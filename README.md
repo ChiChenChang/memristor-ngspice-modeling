@@ -130,23 +130,24 @@ The baseline implementation is based on the Dynamic Memdiode Model (DMM).
 
 The terminal voltage `V(p,n)` is first mapped into a smooth polarity-dependent
 target function and voltage-dependent SET/RESET time constants. The internal
-state then evolves through a relaxation-type equation of the general form
+state then evolves through a relaxation-type equation of the general form:
 
-\[
+$$
 \frac{dx}{dt}
 =
 \frac{A(V)-x}{\tau(V)},
 \qquad
-\tau(V)=R_h(V)C_h .
-\]
+\tau(V)=R_h(V)C_h
+$$
 
 Here, `A(V)` determines the polarity-dependent target state, while `R_h(V)`
 controls the voltage-dependent switching speed. The raw state `x` is converted
 into a bounded effective state `xh`, which is subsequently used by the nonlinear
 terminal-current equation.
 
-The NGSpice implementation also includes smooth polarity blending, bounded-state
-mapping, and protected exponential functions to improve transient convergence.
+The NGSpice implementation also includes smooth polarity blending,
+bounded-state mapping, and protected exponential functions to improve transient
+convergence.
 
 ### 2. Direct Terminal-Voltage-Driven State Model
 
@@ -167,33 +168,42 @@ sharpness, hysteresis formation, numerical behavior, and state recovery.
 The third implementation replaces the DMM relaxation equation with a
 Yakopcic-like threshold-driven state equation.
 
-Its general structure is
+Its general structure is:
 
-\[
-I = I(V,x_h),
-\]
+$$
+I = I(V,x_h)
+$$
 
-\[
+$$
 \frac{dx}{dt}
 =
 r_{\mathrm{SET}}(V,x_h)
 -
-r_{\mathrm{RESET}}(V,x_h),
-\]
+r_{\mathrm{RESET}}(V,x_h)
+$$
 
-where smooth voltage-activation functions enable SET or RESET only after the
+Smooth voltage-activation functions enable SET or RESET only after the
 corresponding voltage threshold is reached. State-dependent boundary terms,
-such as `(1-xh)^pSET` and `xh^pRESET`, gradually suppress the switching rate as
-the state approaches its upper or lower limit.
+such as
+
+$$
+(1-x_h)^{p_{\mathrm{SET}}}
+\qquad \text{and} \qquad
+x_h^{p_{\mathrm{RESET}}},
+$$
+
+gradually suppress the switching rate as the state approaches its upper or
+lower boundary.
 
 In the SPICE implementation, a behavioral current source represents `dx/dt`,
 an internal capacitor integrates the raw state `x`, and a bounded mapping
-produces `xh` for use in both the rate equations and terminal-current equation.
+produces `xh` for use in both the rate equations and the terminal-current
+equation.
 
-This is described as **Yakopcic-like** rather than an exact reproduction of the
-original model because its state-update concept is adapted to the common
-memdiode transport and NGSpice implementation framework used in this project.
-
+This implementation is described as **Yakopcic-like**, rather than as an exact
+reproduction of the original model, because its state-update concept is adapted
+to the common memdiode transport and NGSpice implementation framework used in
+this project.
 ### Purpose of the Comparison
 
 These files are not three unrelated memristor models. They are controlled
