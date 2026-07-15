@@ -1,0 +1,23 @@
+name: Python syntax check
+
+"on":
+  push:
+  pull_request:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile Python scripts
+        run: |
+          python -m py_compile fit_memristor_pso.py
+          python -m py_compile analyze_operating_condition_sweeps.py
+          python -m py_compile analyze_equation_term_sweep.py
