@@ -1,0 +1,232 @@
+* Portfolio filename: model_material_rate_state.cir
+* Original working file: 0513(3).cir
+* 0505 memdiode bipolar IV loop simulation
+.param S0   = 0.1
+.param H0   = 0
+.param CH0  = 1e-8
+.param R_on = 1e6
+.param R_off= 1e8
+
+
+*V1 p 0 SIN(0 6 100)
+V1 p 0 PWL(
++ 0      0
++ 5m   6
++ 10m     0
++ 15m  -6
++ 20m     0
+)
+
+
+X1 p 0 x memdiode_bipolar S0={S0} H0={H0} CH0={CH0} R_on={R_on} R_off={R_off}
+
+.options method=gear reltol=1e-4 abstol=1e-15 gmin=1e-12
+
+.control
+  set numdgt 12
+  set wr_singlescale
+  set wr_vecnames
+  tran 1e-6 20m 0 uic maxstep=2e-7
+  wrdata iv_loop.dat time v(p) i(V1) v(x)
+.endc
+
+.subckt memdiode_bipolar p n x S0=0.7 H0=0.5 CH0=1e-8 R_on=1e5 R_off=1e8
+
+  * ============================================================
+  * Basic utility functions
+  * ============================================================
+  .func linmod(x, m, b)    { m*x + b }
+  .func logmod(x, a, b, c) { a*log10(x) + b*x + c }
+  .func clamp0(v)          { min(max(v,0),1) }
+  .func xeff(v)            { min(max(v,1e-9),1-1e-9) }
+  .func step(v)            { 0.5*(1 + tanh(10*v)) }
+  .func safe_exp(v)        { exp(min(max(v,-20),20)) }
+
+  .param I_SCALE     = 1e-6
+  .param ALPHA_SCALE = 0.25
+
+  .func alpha_pos_x(xh) { ALPHA_SCALE*(alpha_pos_l + clamp0(xh)*(alpha_pos_m-alpha_pos_l)) }
+  .func alpha_neg_x(xh) { ALPHA_SCALE*(alpha_neg_l + clamp0(xh)*(alpha_neg_m-alpha_neg_l)) }
+
+  .func log_i0_pos_x(xh) { log10(imin_pos) + clamp0(xh)*(log10(imax_pos)-log10(imin_pos)) }
+  .func log_i0_neg_x(xh) { log10(imin_neg) + clamp0(xh)*(log10(imax_neg)-log10(imin_neg)) }
+
+  .func i0_pos_x(xh) { I_SCALE*pow(10, log_i0_pos_x(xh)) }
+  .func i0_neg_x(xh) { I_SCALE*pow(10, log_i0_neg_x(xh)) }
+
+  * ============================================================
+  * State-dependent resistance
+  * x = 0 : HRS / OFF
+  * x = 1 : LRS / ON
+  * ============================================================
+  .func RSc(v) { pow(10, log10(R_off) - clamp0(v)*(log10(R_off)-log10(R_on))) }
+
+   * ============================================================
+  * I-V parameters
+  * These describe nonlinear electronic conduction.
+  * x changes the effective current scale and barrier slope.
+  * ============================================================
+  .param beta_pos       = 0.5
+  .param beta_neg       = 0.5
+
+  * -------- Stronger S0 dependence for current scale --------
+  .param imax_pos_sl    = 5
+  .param imax_pos_in    = -7.0
+  .param imax_pos       = pow(10, linmod(S0, imax_pos_sl, imax_pos_in))
+
+  .param imin_pos_sl    = 5
+  .param imin_pos_in    = -9.0
+  .param imin_pos       = pow(10, linmod(S0, imin_pos_sl, imin_pos_in))
+
+  .param imax_neg       = imax_pos
+  .param imin_neg       = imin_pos
+
+  * -------- Stronger S0 dependence for nonlinear slope alpha --------
+  .param amax_pos_sl    = 5.0
+  .param amax_pos_in    = 0.3
+  .param alpha_pos_m    = linmod(S0, amax_pos_sl, amax_pos_in)
+
+  .param amin_pos_sl    = 4.5
+  .param amin_pos_in    = 0.1
+  .param alpha_pos_l    = linmod(S0, amin_pos_sl, amin_pos_in)
+
+  .param alpha_neg_m    = alpha_pos_m
+  .param alpha_neg_l    = alpha_pos_l
+
+  * ============================================================
+  * Material-related SET / RESET threshold parameters
+  * Positive voltage : SET, x increases
+  * Negative voltage : RESET, x decreases
+  * ============================================================
+
+  * Low S0: high Vset, difficult to SET
+  * High S0: low Vset, easy to SET
+  .param vset_pos_sl    = -5.0
+  .param vset_pos_in    = 6.0
+  .param vset_pos       = linmod(S0, vset_pos_sl, vset_pos_in)
+
+  .param vreset_pos_sl  = -4.0
+  .param vreset_pos_in  = 5.5
+  .param vreset_pos     = linmod(S0, vreset_pos_sl, vreset_pos_in)
+
+  * ============================================================
+  * Material-inspired state evolution parameters
+  *
+  * kset0, kreset0:
+  *   base rate of filament growth / rupture, unit = 1/s
+  *
+  * gamma_set, gamma_reset:
+  *   field-enhanced activation factor.
+  *   Larger value means stronger voltage acceleration.
+  *
+  * kth:
+  *   smoothness of activation threshold.
+  *   Larger value gives sharper threshold.
+  *
+  * p_set, p_reset:
+  *   saturation exponents.
+  *   SET slows down as x approaches 1.
+  *   RESET slows down as x approaches 0.
+  *
+  * kleak:
+  *   slow retention loss or spontaneous relaxation.
+  *   For nonvolatile behavior, keep kleak = 0.
+  * ============================================================
+  .param kset0        = 1200
+  .param kreset0      = 190
+  .param gamma_set    = 1.6
+  .param gamma_reset  = 0.52
+  .param kth          = 10
+  .param p_set        = 0.85
+  *.param p_set        = 1.35
+  .param p_reset      = 1.1
+
+  .param kleak        = 0
+  .param xret         = 0.5
+
+  * Smooth activation windows
+  .func gset(v)   { 0.5*(1 + tanh(kth*(v - vset_pos))) }
+  .func greset(v) { 0.5*(1 + tanh(kth*((-v) - vreset_pos))) }
+
+  * SET rate:
+  * Positive voltage lowers the activation barrier,
+  * oxygen-vacancy / conductive-filament formation becomes faster.
+  .func rate_set(v,xh) {
+  + kset0
+  + * gset(v)
+  + * safe_exp(gamma_set*(v - vset_pos))
+  + * pow(max(1 - xh, 1e-9), p_set)
+  + }
+
+  * RESET rate:
+  * Negative voltage activates filament rupture / vacancy redistribution.
+  .func rate_reset(v,xh) {
+  + kreset0
+  + * greset(v)
+  + * safe_exp(gamma_reset*((-v) - vreset_pos))
+  + * pow(max(xh, 1e-9), p_reset)
+  + }
+
+  * ============================================================
+  * State capacitor
+  *
+  * V(x) is the normalized material state:
+  *   V(x) ≈ 0 : OFF / ruptured filament / weak vacancy channel
+  *   V(x) ≈ 1 : ON  / formed filament  / strong vacancy channel
+  *
+  * C*dV(x)/dt = injected state current
+  * Therefore:
+  *
+  * dx/dt = rate_set(V)*(1-x) - rate_reset(V)*x - kleak*(x-xret)
+  * ============================================================
+  Ch_internal x 0 c={CH0} ic={H0}
+
+  Bstate 0 x I={
+  + CH0*
+  + (
+  +   rate_set(V(p,n), xeff(V(x)))
+  + - rate_reset(V(p,n), xeff(V(x)))
+  + - kleak*(V(x)-xret)
+  + )
+  + }
+
+  * ============================================================
+  * Soft boundary protection for state variable
+  * Prevent x from going below 0 or above 1.
+  * ============================================================
+  Bx_hi x 0 I={1e-4*step(V(x)-1)*(V(x)-1)}
+  Bx_lo 0 x I={1e-4*step(-V(x))*(-V(x))}
+
+  * ============================================================
+  * Conductive paths
+  * 1. Ohmic-like state-dependent resistance
+  * 2. Nonlinear memdiode current
+  * ============================================================
+  Rp p n r={RSc(V(x))}
+
+  Gcur p n value={
++ step(V(p,n))*
++ (
++   i0_pos_x(V(x))
++   *
++   (
++     safe_exp(beta_pos*alpha_pos_x(V(x))*V(p,n))
++     -
++     safe_exp(-(1-beta_pos)*alpha_pos_x(V(x))*V(p,n))
++   )
++ )
++ +
++ step(-V(p,n))*
++ (
++   -
++   i0_neg_x(V(x))
++   *
++   (
++     safe_exp(beta_neg*alpha_neg_x(V(x))*(-V(p,n)))
++     -
++     safe_exp(-(1-beta_neg)*alpha_neg_x(V(x))*(-V(p,n)))
++   )
++ )
++ }
+
+.ends memdiode_bipolar

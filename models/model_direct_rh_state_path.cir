@@ -1,0 +1,167 @@
+* Portfolio filename: model_direct_rh_state_path.cir
+* Original working file: 0421_H(3).cir
+* 0421 memdiode bipolar IV loop simulation with monitor outputs
+.param S0   = 0.5
+.param H0   = 0
+.param CH0  = 1e-8
+.param R_on = 1e5
+.param R_off= 1e8
+
+V1 p 0 PWL(
++ 0      0
++ 5m     6
++ 10m    0
++ 15m   -0.1
++ 20m    0
++ 25m   -0.1
++ 30m    0
++ 35m   -0.1
++ 40m    0
+)
+
+* Extra monitor pins:
+* drive        : direct driving voltage V(p,n), used by 0421 state path
+* aref         : A-like reference value, only for comparison, not used in 0421
+* rhrawmon     : Rh_raw(V)
+* rhmon        : actual Rh = softmax(Rh_min, Rh_raw, 5e4)
+* dxdt_core    : dx/dt contribution from Rh path = (V(p,n)-x)/(Rh*CH0)
+* dxdt_limiter : dx/dt contribution from limiter
+* dxdt_total   : dxdt_core + dxdt_limiter
+X1 p 0 x drive aref rhrawmon rhmon dxdt_core dxdt_limiter dxdt_total memdiode_bipolar S0={S0} H0={H0} CH0={CH0} R_on={R_on} R_off={R_off}
+
+.options method=gear reltol=1e-4 abstol=1e-15 gmin=1e-12
+
+.control
+  set numdgt 12
+  set wr_singlescale
+  set wr_vecnames
+  *tran 2e-4 10 0 uic maxstep=4e-3
+  tran 1e-6 40m 0 uic maxstep=2e-7
+
+  * Do not write "time" here, because wrdata already writes the scale column.
+  wrdata iv_loop_0421_monitor.dat v(p) i(V1) v(x) v(drive) v(aref) v(rhrawmon) v(rhmon) v(dxdt_core) v(dxdt_limiter) v(dxdt_total)
+.endc
+
+
+.subckt memdiode_bipolar p n x drive aref rhrawmon rhmon dxdt_core dxdt_limiter dxdt_total S0=0.7 H0=0.5 CH0=1e-8 R_on=1e4 R_off=1e8
+
+  .func linmod(x, m, b)    { m*x + b }
+  .func logmod(x, a, b, c) { a*log10(x) + b*x + c }
+  .func clamp0(v)          { min(max(v,0),1) }
+  .func step(v)            { 0.5*(1 + tanh(10*v)) }
+  .func safe_exp(v)        { exp(min(max(v,-20),20)) }
+  .func RSc(v)             { R_off - (R_off - R_on)*clamp0(v) }
+  .func softmax(a,b,k)     { 0.5*(a+b+sqrt((a-b)*(a-b)+k*k)) }
+
+  * A-like reference only for comparison with A-template
+  .param VSLOPE_A = 0.1
+  .func sstep(v) { 0.5*(1 + tanh(v/VSLOPE_A)) }
+
+  .param Rh_scale = 2
+  .param Rh_min   = 2e4
+
+  .param beta_pos = 0.5
+  .param beta_neg = 0.5
+
+  .param imax_pos_sl = 0.20156204
+  .param imax_pos_in = -2.60083086
+  .param imax_pos    = pow(10, linmod(S0, imax_pos_sl, imax_pos_in))
+
+  .param imin_pos_sl = -2.99958421
+  .param imin_pos_in = -4.00032977
+  .param imin_pos    = pow(10, linmod(S0, imin_pos_sl, imin_pos_in))
+
+  .param imax_neg = imax_pos
+  .param imin_neg = imin_pos
+
+  .param amax_pos_sl = 0.2558
+  .param amax_pos_in = 3.81730
+  .param alpha_pos_m = linmod(S0, amax_pos_sl, amax_pos_in)
+
+  .param amin_pos_sl = 0.4212
+  .param amin_pos_in = 2.7680
+  .param alpha_pos_l = linmod(S0, amin_pos_sl, amin_pos_in)
+
+  .param alpha_neg_m = alpha_pos_m
+  .param alpha_neg_l = alpha_pos_l
+
+  .param vset_pos_sl = 2.48
+  .param vset_pos_in = 1.5
+  .param vset_pos    = linmod(S0, vset_pos_sl, vset_pos_in)
+
+  .param vreset_pos_sl = 1.6
+  .param vreset_pos_in = 3
+  .param vreset_pos    = linmod(S0, vreset_pos_sl, vreset_pos_in)
+
+  .param vset_neg   = -vset_pos
+  .param vreset_neg = -vreset_pos
+
+  .param etaset_pos_a = 1.6375
+  .param etaset_pos_b = -0.7838
+  .param etaset_pos_c = 3.3043
+
+  .param eta_set_scale  = 0.15
+  .param etaset_pos_raw = pow(10, logmod(S0, etaset_pos_a, etaset_pos_b, etaset_pos_c))
+  .param etaset_pos     = eta_set_scale*etaset_pos_raw
+
+  .param etares_pos_sl = 0.4697
+  .param etares_pos_in = 0.3527
+  .param etares_pos    = pow(10, linmod(S0, etares_pos_sl, etares_pos_in))
+
+  .param etaset_neg = etaset_pos
+  .param etares_neg = etares_pos
+
+  .func Rh_raw(v) { Rh_scale*(step(v)*safe_exp(-etaset_pos*(v-vset_pos)) + step(-v)*safe_exp(-etaset_neg*((-v)-abs(vset_neg))) + (1-step(abs(v)))*safe_exp(step(v)*etares_pos*(v-vreset_pos) + step(-v)*etares_neg*((-v)-abs(vreset_neg)))) }
+
+  .func Rh_eff(v) { softmax(Rh_min, Rh_raw(v), 5e4) }
+
+  * ============================================================
+  * 0421 state path:
+  * p -> Rh(V) -> x -> Ch_internal
+  * ============================================================
+
+  Rh p x r={ Rh_eff(V(p,n)) }
+
+  Ch_internal x 0 c={CH0} ic={H0}
+
+  * Soft limiter for state variable x
+  Bx_hi x 0 I={1e-4*step(V(x)-1)*(V(x)-1)}
+  Bx_lo 0 x I={1e-4*step(-V(x))*(-V(x))}
+
+  * ============================================================
+  * Monitor outputs
+  * ============================================================
+
+  * Direct voltage used to drive x in 0421
+  Bdrive drive 0 V = { V(p,n) }
+
+  * A-like target value, only for comparison with original A-template
+  Baref aref 0 V = { sstep(V(p,n)) }
+
+  * Rh_raw and actual Rh
+  BRhrawmon rhrawmon 0 V = { Rh_raw(V(p,n)) }
+  BRhmon    rhmon    0 V = { Rh_eff(V(p,n)) }
+
+  * Core state-update term caused by Rh:
+  * dx/dt_core = (V(p,n)-x)/(Rh*CH0)
+  Bdxdtcore dxdt_core 0 V = { (V(p,n)-V(x))/(Rh_eff(V(p,n))*CH0) }
+
+  * Limiter contribution to dx/dt:
+  * Bx_hi current pulls x downward when x>1
+  * Bx_lo current pushes x upward when x<0
+  Bdxdtlim dxdt_limiter 0 V = { (-1e-4*step(V(x)-1)*(V(x)-1) + 1e-4*step(-V(x))*(-V(x)))/CH0 }
+
+  * Total approximate dx/dt
+  Bdxdttotal dxdt_total 0 V = { (V(p,n)-V(x))/(Rh_eff(V(p,n))*CH0) + (-1e-4*step(V(x)-1)*(V(x)-1) + 1e-4*step(-V(x))*(-V(x)))/CH0 }
+
+  * ============================================================
+  * Same conduction path as 0421
+  * ============================================================
+
+  Rp p n r={RSc(V(x))}
+
+  Gcur p n value={step(V(p,n))*((imax_pos*clamp0(V(x))+imin_pos*(1-clamp0(V(x))))*(safe_exp(beta_pos*(alpha_pos_m*clamp0(V(x))+alpha_pos_l*(1-clamp0(V(x))))*V(p,n))-safe_exp(-(1-beta_pos)*(alpha_pos_m*clamp0(V(x))+alpha_pos_l*(1-clamp0(V(x))))*V(p,n))))+step(-V(p,n))*(-((imax_neg*clamp0(V(x))+imin_neg*(1-clamp0(V(x))))*(safe_exp(beta_neg*(alpha_neg_m*clamp0(V(x))+alpha_neg_l*(1-clamp0(V(x))))*(-V(p,n)))-safe_exp(-(1-beta_neg)*(alpha_neg_m*clamp0(V(x))+alpha_neg_l*(1-clamp0(V(x))))*(-V(p,n))))))}
+
+.ends memdiode_bipolar
+
+.end

@@ -1,0 +1,149 @@
+* Portfolio filename: model_target_state_path.cir
+* Original working file: 0514_A(6).cir
+* ============================================================
+* A-template version under 0421 test conditions
+* Purpose: compare A -> Rh -> x -> Cx with 0421 p -> Rh(V) -> x
+* Only the state-update path is changed to the original A-template style.
+* ============================================================
+
+.param S0   = 0.5
+.param H0   = 0
+.param CH0  = 1e-8
+.param R_on = 1e5
+.param R_off= 1e8
+
+* Same test waveform as 0421
+V1 p 0 PWL(
++ 0      0
++ 1.25   6
++ 2.5   0
++ 3.75   -0.1
++ 5    0
++ 6.25   -0.1
++ 7.5    0
++ 8.75   -0.1
++ 10    0
+)
+
+* Extra monitor pins:
+* a     : original A target-state node
+* rhmon : actual Rh value used by A-template
+* dxdt  : approximate dx/dt = (A-x)/(Rh*CH0)
+X1 p 0 x a rhmon dxdt memdiode_bipolar S0={S0} H0={H0} CH0={CH0} R_on={R_on} R_off={R_off}
+
+.options method=gear reltol=1e-4 abstol=1e-15 gmin=1e-12
+
+.control
+  set numdgt 12
+  set wr_singlescale
+  set wr_vecnames
+  tran 2e-4 10 0 uic maxstep=4e-3
+  *tran 1e-6 40m 0 uic maxstep=2e-7
+  wrdata iv_loop_A_template.dat time v(p) i(V1) v(x) v(a) v(rhmon) v(dxdt)
+.endc
+
+.subckt memdiode_bipolar p n x A rhmon dxdt S0=0.7 H0=0.5 CH0=1e-8 R_on=1e4 R_off=1e8
+
+  * ============================================================
+  * Basic utility functions, same as 0421
+  * ============================================================
+  .func linmod(x, m, b)    { m*x + b }
+  .func logmod(x, a, b, c) { a*log10(x) + b*x + c }
+  .func clamp0(v)          { min(max(v,0),1) }
+  .func step(v)            { 0.5*(1 + tanh(10*v)) }
+  .func safe_exp(v)        { exp(min(max(v,-20),20)) }
+  .func RSc(v)             { R_off - (R_off - R_on)*clamp0(v) }
+
+  * Smooth polarity target used by the original template
+  * VSLOPE=0.1 makes this comparable to step(v)=0.5*(1+tanh(10v)).
+  .param VSLOPE_A = 0.1
+  .func sstep(v) { 0.5*(1 + tanh(v/VSLOPE_A)) }
+
+  * ============================================================
+  * Same I-V and material-parameter mapping as 0421
+  * ============================================================
+  .param Rh_scale = 2
+  .param Rh_min   = 2e4
+  .param Rh_max   = 1e12
+
+  .param beta_pos = 0.5
+  .param beta_neg = 0.5
+
+  .param imax_pos_sl = 0.20156204
+  .param imax_pos_in = -2.60083086
+  .param imax_pos    = pow(10, linmod(S0, imax_pos_sl, imax_pos_in))
+
+  .param imin_pos_sl = -2.99958421
+  .param imin_pos_in = -4.00032977
+  .param imin_pos    = pow(10, linmod(S0, imin_pos_sl, imin_pos_in))
+
+  .param imax_neg = imax_pos
+  .param imin_neg = imin_pos
+
+  .param amax_pos_sl = 0.2558
+  .param amax_pos_in = 3.81730
+  .param alpha_pos_m = linmod(S0, amax_pos_sl, amax_pos_in)
+
+  .param amin_pos_sl = 0.4212
+  .param amin_pos_in = 2.7680
+  .param alpha_pos_l = linmod(S0, amin_pos_sl, amin_pos_in)
+
+  .param alpha_neg_m = alpha_pos_m
+  .param alpha_neg_l = alpha_pos_l
+
+  .param vset_pos_sl = 2.48
+  .param vset_pos_in = 1.5
+  .param vset_pos    = linmod(S0, vset_pos_sl, vset_pos_in)
+
+  .param vreset_pos_sl = 1.6
+  .param vreset_pos_in = 3
+  .param vreset_pos    = linmod(S0, vreset_pos_sl, vreset_pos_in)
+
+  .param etaset_pos_a = 1.6375
+  .param etaset_pos_b = -0.7838
+  .param etaset_pos_c = 3.3043
+
+  .param eta_set_scale  = 0.15
+  .param etaset_pos_raw = pow(10, logmod(S0, etaset_pos_a, etaset_pos_b, etaset_pos_c))
+  .param etaset_pos     = eta_set_scale*etaset_pos_raw
+
+  .param etares_pos_sl = 0.4697
+  .param etares_pos_in = 0.3527
+  .param etares_pos    = pow(10, linmod(S0, etares_pos_sl, etares_pos_in))
+
+  * ============================================================
+  * Original A-template state update path
+  * Difference from 0421 is here:
+  *   0421: Rh p x r={softmax(...Rh_raw(V(p,n))...)}
+  *   this: A=sstep(V), Rh x A r={clip(A*Stau+(1-A)*Rtau)}
+  * ============================================================
+
+  * A is a target-state node: positive V -> A~1, negative V -> A~0, zero V -> A=0.5
+  BA A 0 V = { sstep(V(p,n)) }
+
+  * SET and RESET state-evolution resistances, using 0421 parameter values.
+  * Positive voltage SET: high V makes Stau small -> x moves faster toward A~1.
+  * Negative voltage RESET: sufficiently negative V makes Rtau small -> x moves faster toward A~0.
+  .func Stau(v) { Rh_scale*safe_exp(-etaset_pos*(v - vset_pos)) }
+  .func Rtau(v) { Rh_scale*safe_exp( etares_pos*(v + vreset_pos)) }
+  .func blend(w,a,b) { w*a + (1-w)*b }
+  .func Rh_A(v,w) { min(Rh_max, max(Rh_min, blend(w, Stau(v), Rtau(v)))) }
+
+  Rh x A r={ Rh_A(V(p,n), V(A)) }
+  Ch_internal x 0 c={CH0} ic={H0}
+
+  * Optional monitors for plotting and explanation
+  BRhmon rhmon 0 V = { Rh_A(V(p,n), V(A)) }
+  Bdxdt  dxdt  0 V = { (V(A)-V(x))/(Rh_A(V(p,n), V(A))*CH0) }
+
+  * Very large leak to avoid an accidental floating node
+  Rxl x 0 1e12
+
+  * Same conduction path as 0421
+  Rp p n r={RSc(V(x))}
+
+  Gcur p n value={step(V(p,n))*((imax_pos*clamp0(V(x))+imin_pos*(1-clamp0(V(x))))*(safe_exp(beta_pos*(alpha_pos_m*clamp0(V(x))+alpha_pos_l*(1-clamp0(V(x))))*V(p,n))-safe_exp(-(1-beta_pos)*(alpha_pos_m*clamp0(V(x))+alpha_pos_l*(1-clamp0(V(x))))*V(p,n))))+step(-V(p,n))*(-((imax_neg*clamp0(V(x))+imin_neg*(1-clamp0(V(x))))*(safe_exp(beta_neg*(alpha_neg_m*clamp0(V(x))+alpha_neg_l*(1-clamp0(V(x))))*(-V(p,n)))-safe_exp(-(1-beta_neg)*(alpha_neg_m*clamp0(V(x))+alpha_neg_l*(1-clamp0(V(x))))*(-V(p,n))))))}
+
+.ends memdiode_bipolar
+
+.end
