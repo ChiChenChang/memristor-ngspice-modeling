@@ -1,4 +1,4 @@
-# Memristor NGSpice Modeling
+# Dynamic Compact Modeling and NGSpice Circuit Implementation of Bipolar Memristive Devices 
 
 A reproducible Python + NGSpice workflow for dynamic compact modeling of bipolar
 memristive devices. The project connects measured I-V data, SPICE-in-the-loop
