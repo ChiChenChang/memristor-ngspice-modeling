@@ -132,13 +132,13 @@ The terminal voltage `V(p,n)` is first mapped into a smooth polarity-dependent
 target function and voltage-dependent SET/RESET time constants. The internal
 state then evolves through a relaxation-type equation of the general form:
 
-$$
+```math
 \frac{dx}{dt}
 =
 \frac{A(V)-x}{\tau(V)},
 \qquad
 \tau(V)=R_h(V)C_h
-$$
+```
 
 Here, `A(V)` determines the polarity-dependent target state, while `R_h(V)`
 controls the voltage-dependent switching speed. The raw state `x` is converted
@@ -170,27 +170,26 @@ Yakopcic-like threshold-driven state equation.
 
 Its general structure is:
 
-$$
+```math
 I = I(V,x_h)
-$$
+```
 
-$$
+```math
 \frac{dx}{dt}
 =
 r_{\mathrm{SET}}(V,x_h)
 -
 r_{\mathrm{RESET}}(V,x_h)
-$$
+```
 
 Smooth voltage-activation functions enable SET or RESET only after the
 corresponding voltage threshold is reached. State-dependent boundary terms,
-such as
 
-$$
+```math
 (1-x_h)^{p_{\mathrm{SET}}}
 \qquad \text{and} \qquad
-x_h^{p_{\mathrm{RESET}}},
-$$
+x_h^{p_{\mathrm{RESET}}}
+```
 
 gradually suppress the switching rate as the state approaches its upper or
 lower boundary.
@@ -204,6 +203,7 @@ This implementation is described as **Yakopcic-like**, rather than as an exact
 reproduction of the original model, because its state-update concept is adapted
 to the common memdiode transport and NGSpice implementation framework used in
 this project.
+
 ### Purpose of the Comparison
 
 These files are not three unrelated memristor models. They are controlled
