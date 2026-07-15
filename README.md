@@ -117,21 +117,95 @@ python analyze_voltage_sweep.py
 
 The script supports positive- and negative-amplitude sweeps, multi-negative sequences, repeated cycles, and thesis-oriented comparison metrics.
 
-## SPICE Model Variants
+## SPICE Model Implementations
 
-The `models/` directory contains three exploratory state-equation implementations:
+The `models/` directory contains three related implementations developed to
+compare how the terminal voltage is translated into internal-state evolution.
+They share a SPICE-oriented memristive-device framework, but use different
+state-update formulations.
 
-1. **Material-rate state model** — explicit SET and RESET rates with smooth activation and boundary protection.
-2. **Direct Rh state path** — voltage-dependent dynamic resistance directly drives the internal-state node.
-3. **Target-state model** — a smooth polarity target `A(V)` drives the internal state through blended SET/RESET time constants.
+### 1. DMM-Based Relaxation Model
 
-These files document the model-development process and the comparison of alternative state-update formulations.
+The baseline implementation is based on the Dynamic Memdiode Model (DMM).
 
-## Reproducibility Notes
+The terminal voltage `V(p,n)` is first mapped into a smooth polarity-dependent
+target function and voltage-dependent SET/RESET time constants. The internal
+state then evolves through a relaxation-type equation of the general form
 
-The Python scripts were originally developed as thesis-oriented standalone engineering programs. The repository version preserves the validated computational logic while standardizing file names and output paths.
+\[
+\frac{dx}{dt}
+=
+\frac{A(V)-x}{\tau(V)},
+\qquad
+\tau(V)=R_h(V)C_h .
+\]
 
-Generated results, logs, local executables, measured data, and fitted parameter files are excluded through `.gitignore`.
+Here, `A(V)` determines the polarity-dependent target state, while `R_h(V)`
+controls the voltage-dependent switching speed. The raw state `x` is converted
+into a bounded effective state `xh`, which is subsequently used by the nonlinear
+terminal-current equation.
+
+The NGSpice implementation also includes smooth polarity blending, bounded-state
+mapping, and protected exponential functions to improve transient convergence.
+
+### 2. Direct Terminal-Voltage-Driven State Model
+
+This implementation explores a more direct coupling between the terminal
+voltage `V(p,n)` and the internal state-update path.
+
+Unlike the baseline DMM formulation, which first converts the applied voltage
+into a target state and a blended relaxation time constant, this variant reduces
+the intermediate mappings and allows the terminal voltage to act more directly
+on the dynamic state or resistance-controlling node.
+
+The purpose of this model is not to define a separate physical device, but to
+examine how simplifying the voltage-to-state pathway changes switching
+sharpness, hysteresis formation, numerical behavior, and state recovery.
+
+### 3. Yakopcic-Like Threshold-Rate Model
+
+The third implementation replaces the DMM relaxation equation with a
+Yakopcic-like threshold-driven state equation.
+
+Its general structure is
+
+\[
+I = I(V,x_h),
+\]
+
+\[
+\frac{dx}{dt}
+=
+r_{\mathrm{SET}}(V,x_h)
+-
+r_{\mathrm{RESET}}(V,x_h),
+\]
+
+where smooth voltage-activation functions enable SET or RESET only after the
+corresponding voltage threshold is reached. State-dependent boundary terms,
+such as `(1-xh)^pSET` and `xh^pRESET`, gradually suppress the switching rate as
+the state approaches its upper or lower limit.
+
+In the SPICE implementation, a behavioral current source represents `dx/dt`,
+an internal capacitor integrates the raw state `x`, and a bounded mapping
+produces `xh` for use in both the rate equations and terminal-current equation.
+
+This is described as **Yakopcic-like** rather than an exact reproduction of the
+original model because its state-update concept is adapted to the common
+memdiode transport and NGSpice implementation framework used in this project.
+
+### Purpose of the Comparison
+
+These files are not three unrelated memristor models. They are controlled
+variants of the state-evolution mechanism:
+
+- the DMM model provides the relaxation-based baseline;
+- the direct-voltage model tests a simplified voltage-to-state coupling;
+- the Yakopcic-like model tests threshold-activated SET/RESET rate dynamics.
+
+Together, they demonstrate that the same SPICE device framework can support
+different assumptions for internal-state evolution while preserving
+history-dependent nonlinear I–V behavior.
 
 
 ## Author
