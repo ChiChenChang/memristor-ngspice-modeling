@@ -1,0 +1,53 @@
+* =============================================================================
+* model_yakopcic_like_rate.cir
+* Yakopcic-like threshold-rate state equation embedded in the common
+* memdiode transport framework.
+*
+* This is an adapted implementation, not an exact reproduction of the
+* original Yakopcic model.
+* =============================================================================
+
+Vcmd p 0 PWL(0 0 2.5 6 5 0 7.5 -6 10 0)
+Xmem p 0 x xh memristor_yakopcic_like
+
+.options method=gear reltol=4e-3 abstol=2e-15 vntol=2e-9 gmin=1e-12
+
+.control
+  set noaskquit
+  set filetype=ascii
+  set wr_singlescale
+  tran 1m 10 0 200u uic
+  wrdata yakopcic_like_rate.dat v(p) i(Vcmd) v(x) v(xh) v(set_rate) v(reset_rate)
+  quit
+.endc
+
+.subckt memristor_yakopcic_like p n x xh
+.param IMAX=2e-3 IMIN=5e-7
+.param ALPHA_MAX=2.6 ALPHA_MIN=1.1 BETA=0.55 ISCALE=1
+.param VP=2.2 VN=1.8 AP=1.8 AN=1.8 KP=4e-5 KN=4e-5
+.param PSET=2 PRESET=2 VSMOOTH=0.12
+.param CH0=1 H0=0.15 EI=2e-9 ROFF=1e11 CPAR=1p
+
+.func safe_exp(z) {exp(min(max(z,-25),25))}
+.func softclip(z) {0.5*(tanh(4*(z-0.5))+1)}
+.func gatep(v) {0.5*(1+tanh((v-VP)/VSMOOTH))}
+.func gaten(v) {0.5*(1+tanh((-v-VN)/VSMOOTH))}
+.func ratep(v) {KP*(safe_exp(AP*(v-VP))-1)*gatep(v)}
+.func raten(v) {KN*(safe_exp(AN*(-v-VN))-1)*gaten(v)}
+.func I0(h) {IMAX*h+IMIN*(1-h)}
+.func Alpha(h) {ALPHA_MAX*h+ALPHA_MIN*(1-h)}
+.func Idiff(v,h) {safe_exp(BETA*Alpha(h)*v)-safe_exp(-(1-BETA)*Alpha(h)*v)}
+
+Rs p d 1
+Bxh xh 0 V={softclip(V(x))}
+Bsetmon set_rate 0 V={ratep(V(d,n))*pow(max(1-V(xh),0),PSET)}
+Bresetmon reset_rate 0 V={raten(V(d,n))*pow(max(V(xh),0),PRESET)}
+Bstate 0 x I={V(set_rate)-V(reset_rate)}
+Cx x 0 {CH0} ic={H0}
+Rstate x 0 1e12
+Bcond d n I={ISCALE*(I0(V(xh))*Idiff(V(d,n),V(xh))+EI*V(d,n))}
+Rleak d n {ROFF}
+Cpar d n {CPAR}
+.ends memristor_yakopcic_like
+
+.end

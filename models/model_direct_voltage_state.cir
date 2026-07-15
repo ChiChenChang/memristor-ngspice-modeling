@@ -1,0 +1,56 @@
+* =============================================================================
+* model_direct_voltage_state.cir
+* Direct terminal-voltage-driven state-path implementation for NGSpice
+*
+* State path:
+*   V(p,n) -> voltage-dependent state drive and Rh(V) -> x -> xh -> I(V,xh)
+*
+* Unlike the DMM target-state path, no separate A(V) target node is used.
+* A smooth limiter suppresses motion near x=0 and x=1.
+* =============================================================================
+
+Vcmd p 0 PWL(0 0 2.5 10 5 0 7.5 -4 10 0)
+Xmem p 0 x xh memristor_direct_state
+
+.options method=gear reltol=4e-3 abstol=2e-15 vntol=2e-9 gmin=1e-12
+
+.control
+  set noaskquit
+  set filetype=ascii
+  set wr_singlescale
+  tran 1m 10 0 200u uic
+  wrdata direct_voltage_state.dat v(p) i(Vcmd) v(x) v(xh) v(drive)
+  quit
+.endc
+
+.subckt memristor_direct_state p n x xh
+.param IMAX=2e-3 IMIN=5e-7
+.param ALPHA_MAX=2.6 ALPHA_MIN=1.1 BETA=0.55 ISCALE=1
+.param VSET=2.8 VRES=1.4 ETA_SET=2.2 ETA_RES=2.0
+.param RH0=1e3 RH_MIN=1 RH_MAX=1e8 VSMOOTH=0.20
+.param CH0=5e-5 H0=0.15 EI=2e-9 ROFF=1e11 CPAR=1p
+.param LIMIT_GAIN=80
+
+.func safe_exp(z) {exp(min(max(z,-25),25))}
+.func softclip(z) {0.5*(tanh(4*(z-0.5))+1)}
+.func pos(v) {0.5*(1+tanh((v-VSET)/VSMOOTH))}
+.func neg(v) {0.5*(1+tanh((-v-VRES)/VSMOOTH))}
+.func Rhv(v) {min(RH_MAX,max(RH_MIN,RH0/(pos(v)+neg(v)+1e-6)))}
+.func I0(h) {IMAX*h+IMIN*(1-h)}
+.func Alpha(h) {ALPHA_MAX*h+ALPHA_MIN*(1-h)}
+.func Idiff(v,h) {safe_exp(BETA*Alpha(h)*v)-safe_exp(-(1-BETA)*Alpha(h)*v)}
+
+Rs p d 1
+Bxh xh 0 V={softclip(V(x))}
+* Positive terminal voltage drives toward 1; negative voltage drives toward 0.
+Bdrive drive 0 V={pos(V(d,n))-neg(V(d,n))}
+* Integrating current source; boundary factors act as a smooth limiter.
+Bstate 0 x I={LIMIT_GAIN*(pos(V(d,n))*(1-V(xh))-neg(V(d,n))*V(xh))/Rhv(V(d,n))}
+Cx x 0 {CH0} ic={H0}
+Rstate x 0 1e12
+Bcond d n I={ISCALE*(I0(V(xh))*Idiff(V(d,n),V(xh))+EI*V(d,n))}
+Rleak d n {ROFF}
+Cpar d n {CPAR}
+.ends memristor_direct_state
+
+.end

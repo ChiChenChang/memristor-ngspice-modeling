@@ -1,0 +1,54 @@
+* =============================================================================
+* model_dmm_relaxation.cir
+* DMM-based target-state relaxation implementation for NGSpice
+*
+* State path:
+*   V(p,n) -> A(V), Stau(V), Rtau(V) -> Rh(V) -> x -> xh -> I(V,xh)
+*
+* This standalone deck is a compact demonstration model. The fitted workflow
+* used by the Python scripts is generated in results/fit/fitdeck_embedded.cir.
+* =============================================================================
+
+Vcmd p 0 PWL(0 0 2.5 10 5 0 7.5 -4 10 0)
+Xmem p 0 x xh memristor_dmm
+
+.options method=gear reltol=4e-3 abstol=2e-15 vntol=2e-9 gmin=1e-12
+
+.control
+  set noaskquit
+  set filetype=ascii
+  set wr_singlescale
+  tran 1m 10 0 200u uic
+  wrdata dmm_relaxation.dat v(p) i(Vcmd) v(x) v(xh)
+  quit
+.endc
+
+.subckt memristor_dmm p n x xh
+.param IMAX=2e-3 IMIN=5e-7
+.param ALPHA_MAX=2.6 ALPHA_MIN=1.1 BETA=0.55 ISCALE=1
+.param VSET=2.8 VRES=1.4 ETA_SET=2.2 ETA_RES=2.0
+.param RH0=1e3 RH_MIN=1 RH_MAX=1e7 VSLOPE=0.5
+.param CH0=5e-5 H0=0.15 EI=2e-9 ROFF=1e11 CPAR=1p
+
+.func safe_exp(z) {exp(min(max(z,-25),25))}
+.func softclip(z) {0.5*(tanh(4*(z-0.5))+1)}
+.func blend(w,a,b) {w*a+(1-w)*b}
+.func A(v) {0.5*(1+tanh(v/VSLOPE))}
+.func Stau(v) {RH0*safe_exp(-ETA_SET*(v-VSET))}
+.func Rtau(v) {RH0*safe_exp( ETA_RES*(v+VRES))}
+.func I0(h) {IMAX*h+IMIN*(1-h)}
+.func Alpha(h) {ALPHA_MAX*h+ALPHA_MIN*(1-h)}
+.func Idiff(v,h) {safe_exp(BETA*Alpha(h)*v)-safe_exp(-(1-BETA)*Alpha(h)*v)}
+
+Bxh xh 0 V={softclip(V(x))}
+BA a 0 V={A(V(d,n))}
+Rs p d 1
+Rh x a r={min(RH_MAX,max(RH_MIN,blend(V(a),Stau(V(d,n)),Rtau(V(d,n)))))}
+Cx x 0 {CH0} ic={H0}
+Rstate x 0 1e12
+Bcond d n I={ISCALE*(I0(V(xh))*Idiff(V(d,n),V(xh))+EI*V(d,n))}
+Rleak d n {ROFF}
+Cpar d n {CPAR}
+.ends memristor_dmm
+
+.end
