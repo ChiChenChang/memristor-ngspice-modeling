@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Local NGSpice executable
+ngspice.exe
+
+# Private measurement data
+data/*.csv
+!data/example_synthetic.csv
+
+# Generated simulation and fitting outputs
+results/
+*.raw
+*.log
+*.dat
+*.out
+
+# Local parameter and deck artifacts
+theta_best.csv
+fitdeck_embedded.cir
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
