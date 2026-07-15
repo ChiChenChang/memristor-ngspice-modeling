@@ -133,16 +133,6 @@ The Python scripts were originally developed as thesis-oriented standalone engin
 
 Generated results, logs, local executables, measured data, and fitted parameter files are excluded through `.gitignore`.
 
-## Confidentiality and Publication
-
-This repository must not contain:
-
-- employer-owned code, netlists, reports, parameters, or internal screenshots
-- confidential experimental data
-- unpublished collaborator data without permission
-- thesis material that the advisor has not approved for public release
-
-The current package is best kept **private** until publication and advisor approval are confirmed.
 
 ## Author
 
